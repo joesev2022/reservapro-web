@@ -1,0 +1,27 @@
+/* src/index.css */
+
+/* Indica a Tailwind dónde escanear (v4) */
+@source "./index.html";
+@source "./src/**/*.{ts,tsx}";
+
+/* Carga Tailwind v4 (equivale a base + components + utilities) */
+@import "tailwindcss";
+
+/* Carga el plugin de animaciones en v4 */
+@plugin "tailwindcss-animate";
+
+/* (Opcional) Tus variables de tema / estilos globales */
+:root {
+  --background: 0 0% 100%;
+  --foreground: 222.2 47.4% 11.2%;
+}
+
+.dark {
+  --background: 222.2 84% 4.9%;
+  --foreground: 210 40% 98%;
+}
+
+body {
+  background-color: hsl(var(--background));
+  color: hsl(var(--foreground));
+}
