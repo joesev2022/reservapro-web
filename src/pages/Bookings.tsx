@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { useLocation } from 'react-router-dom'
 import FullCalendar from '@fullcalendar/react'
 import timeGridPlugin from '@fullcalendar/timegrid'
 import dayGridPlugin from '@fullcalendar/daygrid'
@@ -10,6 +11,8 @@ import { http } from '@/api/http'
 import { Card, CardContent, CardHeader } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { useAuth } from '@/store/auth'
+import { getSocket } from '@/lib/socket'
+import { toast } from 'sonner'
 
 type Venue = { id: string; name: string }
 type Booking = {
@@ -41,6 +44,13 @@ export default function Bookings() {
   useEffect(() => {
     if (!venueId && venuesQ.data?.length) setVenueId(venuesQ.data[0].id)
   }, [venuesQ.data, venueId])
+
+  const loc = useLocation()
+  useEffect(() => {
+    const sp = new URLSearchParams(loc.search)
+    const id = sp.get('venueId')
+    if (id) setVenueId(id)
+  }, [loc.search])
 
   // Cargar reservas del rango
   const bookingsQ = useQuery<Booking[]>({
@@ -74,6 +84,7 @@ export default function Bookings() {
       startAt: sel.start.toISOString(), // pasa UTC al backend
       endAt: sel.end?.toISOString(),
     })
+    toast.success('Reserva creada')
     qc.invalidateQueries({ queryKey: ['bookings'] })
   }
 
@@ -82,6 +93,7 @@ export default function Bookings() {
       startAt: arg.event.start?.toISOString(),
       endAt: arg.event.end?.toISOString(),
     })
+    toast.success('Reserva actualizada')
     qc.invalidateQueries({ queryKey: ['bookings'] })
   }
 
@@ -97,8 +109,22 @@ export default function Bookings() {
     const id = prompt('ID de la reserva a eliminar:')
     if (!id) return
     await http.delete(`/bookings/${id}`)
+    toast.success('Reserva eliminada')
     qc.invalidateQueries({ queryKey: ['bookings'] })
   }
+
+  useEffect(() => {
+    const s = getSocket();
+    const invalidate = () => qc.invalidateQueries({ queryKey: ['bookings'] });
+    s.on('booking.created', invalidate);
+    s.on('booking.updated', invalidate);
+    s.on('booking.deleted', invalidate);
+    return () => {
+      s.off('booking.created', invalidate);
+      s.off('booking.updated', invalidate);
+      s.off('booking.deleted', invalidate);
+    };
+  }, [qc]);
 
   return (
     <div className="p-6 space-y-4">

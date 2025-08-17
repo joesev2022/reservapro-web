@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { useNavigate } from 'react-router-dom';
 import { Card, CardContent, CardHeader } from '@/components/ui/card'
+import { toast } from 'sonner'
 
 export default function Login() {
   const [email, setEmail] = useState('admin@demo.com')
@@ -18,6 +19,7 @@ export default function Login() {
       const { data } = await http.post('/auth/login', { email, password })
       login({ token: data.accessToken, user: data.user })
       navigate('/');
+      toast.success(`Bienvenido, ${data.user.name}`)
     } catch (error) {
       console.error(error)
     }
