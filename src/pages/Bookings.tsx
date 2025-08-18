@@ -13,6 +13,10 @@ import { Button } from '@/components/ui/button'
 import { useAuth } from '@/store/auth'
 import { getSocket } from '@/lib/socket'
 import { toast } from 'sonner'
+import type { EventClickArg } from '@fullcalendar/core'
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
 
 type Venue = { id: string; name: string }
 type UserMini = { id: string; role?: 'admin'|'trabajador'|'cliente'; name?: string }
@@ -44,6 +48,9 @@ export default function Bookings() {
     queryFn: async () => (await http.get('/venues')).data,
     staleTime: 5 * 60_000,
   })
+
+  const [open, setOpen] = useState(false)
+  const [editing, setEditing] = useState<{ id: string; title: string; start?: Date|null; end?: Date|null; ownerId?: string } | null>(null)
 
   useEffect(() => {
     if (!venueId && venuesQ.data?.length) setVenueId(venuesQ.data[0].id)
@@ -86,6 +93,7 @@ export default function Bookings() {
     if (!ok) return
     try {
       await http.post('/bookings', {
+        title: 'Reserva',
         venueId,
         startAt: sel.start.toISOString(), // pasa UTC al backend
         endAt: sel.end?.toISOString(),
@@ -138,6 +146,21 @@ export default function Bookings() {
       console.error(err)
     }
   }
+
+  function onEventClick(arg: EventClickArg) {
+    const e = arg.event
+    setEditing({
+      id: e.id,
+      title: e.title || '',
+      start: e.start,
+      end: e.end,
+      ownerId: (e.extendedProps as any)?.userId as string | undefined,
+    })
+    setOpen(true)
+  }
+
+  const canEditThis = (evOwner?: string) =>
+  role === 'admin' || role === 'trabajador' || evOwner === meId
 
   useEffect(() => {
     const s = getSocket();
@@ -202,9 +225,76 @@ export default function Bookings() {
                 to: info.end.toISOString(),
               })
             }}
+            eventClick={onEventClick}
           />
         </CardContent>
       </Card>
+      
+      {/* 👇 Modal Editar Reserva */}
+      <Dialog open={open} onOpenChange={setOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Editar reserva</DialogTitle>
+          </DialogHeader>
+
+          <div className="space-y-3">
+            <div className="space-y-1">
+              <Label>Título</Label>
+              <Input
+                value={editing?.title ?? ''}
+                onChange={e => setEditing(ed => ed ? ({ ...ed, title: e.target.value }) : ed)}
+                disabled={!canEditThis(editing?.ownerId)}
+              />
+            </div>
+            <div className="text-xs text-muted-foreground">
+              Dueño: {editing?.ownerId === meId ? 'Tú' : (bookingsQ.data?.find(b => b.id === editing?.id)?.user?.name ?? '—')}
+            </div>
+            <div className="text-sm text-muted-foreground">
+              {editing?.start?.toLocaleString()} — {editing?.end?.toLocaleString()}
+            </div>
+          </div>
+
+          <DialogFooter className="gap-2">
+            <Button variant="outline" onClick={() => setOpen(false)}>Cerrar</Button>
+
+            {canEditThis(editing?.ownerId) && (
+              <>
+                <Button
+                  onClick={async () => {
+                    if (!editing) return
+                    try {
+                      await http.patch(`/bookings/${editing.id}`, { title: editing.title })
+                      toast.success('Reserva actualizada')
+                      setOpen(false)
+                      qc.invalidateQueries({ queryKey: ['bookings'] })
+                    } catch {}
+                  }}
+                >
+                  Guardar
+                </Button>
+
+                {(role === 'admin' || role === 'trabajador' || editing?.ownerId === meId) && (
+                  <Button
+                    variant="destructive"
+                    onClick={async () => {
+                      if (!editing) return
+                      if (!confirm('¿Eliminar esta reserva?')) return
+                      try {
+                        await http.delete(`/bookings/${editing.id}`)
+                        toast.success('Reserva eliminada')
+                        setOpen(false)
+                        qc.invalidateQueries({ queryKey: ['bookings'] })
+                      } catch {}
+                    }}
+                  >
+                    Eliminar
+                  </Button>
+                )}
+              </>
+            )}
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }
