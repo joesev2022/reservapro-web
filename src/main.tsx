@@ -12,6 +12,13 @@ createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <QueryClientProvider client={qc}>
       <App />
+      <Toaster
+        richColors
+        position="bottom-right"
+        closeButton
+        expand
+        theme="system"   // detecta light/dark por clase "dark"
+      />
     </QueryClientProvider>
   </StrictMode>,
 )

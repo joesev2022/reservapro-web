@@ -4,7 +4,7 @@ import FullCalendar from '@fullcalendar/react'
 import timeGridPlugin from '@fullcalendar/timegrid'
 import dayGridPlugin from '@fullcalendar/daygrid'
 import interactionPlugin from '@fullcalendar/interaction'
-import type { DateSelectArg, EventDropArg } from '@fullcalendar/core'
+import type { DateSelectArg, EventDropArg, EventApi } from '@fullcalendar/core'
 import type { EventResizeDoneArg } from '@fullcalendar/interaction'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { http } from '@/api/http'
@@ -15,17 +15,21 @@ import { getSocket } from '@/lib/socket'
 import { toast } from 'sonner'
 
 type Venue = { id: string; name: string }
+type UserMini = { id: string; role?: 'admin'|'trabajador'|'cliente'; name?: string }
 type Booking = {
   id: string
   title?: string
   startAt: string // ISO (UTC)
   endAt: string   // ISO (UTC)
   venue: Venue
+  user?: UserMini // 👈 importante para permisos en el front
 }
 
 export default function Bookings() {
   const qc = useQueryClient()
-  const { user } = useAuth()
+  const me = useAuth(s => s.user)
+  const role = me?.role
+  const meId = me?.id
 
   // Si aún NO tienes endpoint GET /venues, pon temporalmente el ID de tu seed:
   // const [venueId, setVenueId] = useState<string>(import.meta.env.VITE_DEFAULT_VENUE_ID!)
@@ -71,7 +75,8 @@ export default function Bookings() {
       id: b.id,
       title: b.title ?? 'Reserva',
       start: b.startAt, // ISO UTC; FullCalendar los interpreta ok
-      end: b.endAt
+      end: b.endAt,
+      extendedProps: { userId: b.user?.id }, // 👈 lo usamos en eventAllow
     }))
   }, [bookingsQ.data])
 
@@ -79,38 +84,59 @@ export default function Bookings() {
     if (!venueId) return
     const ok = confirm(`Crear reserva\n${sel.start.toLocaleString()} - ${sel.end?.toLocaleString()}`)
     if (!ok) return
-    await http.post('/bookings', {
-      venueId,
-      startAt: sel.start.toISOString(), // pasa UTC al backend
-      endAt: sel.end?.toISOString(),
-    })
-    toast.success('Reserva creada')
-    qc.invalidateQueries({ queryKey: ['bookings'] })
+    try {
+      await http.post('/bookings', {
+        venueId,
+        startAt: sel.start.toISOString(), // pasa UTC al backend
+        endAt: sel.end?.toISOString(),
+      })
+      toast.success('Reserva creada')
+      qc.invalidateQueries({ queryKey: ['bookings'] })
+    } catch (err) {
+      console.error(err)
+    }
   }
 
   async function onDrop(arg: EventDropArg) {
-    await http.patch(`/bookings/${arg.event.id}`, {
-      startAt: arg.event.start?.toISOString(),
-      endAt: arg.event.end?.toISOString(),
-    })
-    toast.success('Reserva actualizada')
-    qc.invalidateQueries({ queryKey: ['bookings'] })
+    try {
+      await http.patch(`/bookings/${arg.event.id}`, {
+        startAt: arg.event.start?.toISOString(),
+        endAt: arg.event.end?.toISOString(),
+      })
+      toast.success('Reserva actualizada')
+      qc.invalidateQueries({ queryKey: ['bookings'] })
+    } catch (err) {
+      toast.error('Error al actualizar la reserva')
+      console.error(err)
+      arg.revert() // 👈 vuelve si 400/403/etc.
+    }
   }
 
   async function onResize(arg: EventResizeDoneArg) {
-    await http.patch(`/bookings/${arg.event.id}`, {
-      startAt: arg.event.start?.toISOString(),
-      endAt: arg.event.end?.toISOString(),
-    })
-    qc.invalidateQueries({ queryKey: ['bookings'] })
+    try {
+      await http.patch(`/bookings/${arg.event.id}`, {
+        startAt: arg.event.start?.toISOString(),
+        endAt: arg.event.end?.toISOString(),
+      })
+      toast.success('Reserva actualizada')
+      qc.invalidateQueries({ queryKey: ['bookings'] })
+    } catch (err) {
+      toast.error('Error al actualizar la reserva')
+      console.error(err)
+      arg.revert()
+    }
   }
 
   async function deleteSelected() {
     const id = prompt('ID de la reserva a eliminar:')
     if (!id) return
-    await http.delete(`/bookings/${id}`)
-    toast.success('Reserva eliminada')
-    qc.invalidateQueries({ queryKey: ['bookings'] })
+    try {
+      await http.delete(`/bookings/${id}`)
+      toast.success('Reserva eliminada')
+      qc.invalidateQueries({ queryKey: ['bookings'] })
+    } catch (err) {
+      console.error(err)
+    }
   }
 
   useEffect(() => {
@@ -141,7 +167,9 @@ export default function Bookings() {
                 {venuesQ.data.map(v => <option key={v.id} value={v.id}>{v.name}</option>)}
               </select>
             )}
-            <Button variant="outline" onClick={deleteSelected}>Eliminar por ID</Button>
+            {(role === 'admin' || role === 'trabajador') && (
+              <Button variant="outline" onClick={deleteSelected}>Eliminar por ID</Button>
+            )}
           </div>
         </CardHeader>
         <CardContent>
@@ -161,6 +189,12 @@ export default function Bookings() {
             select={onSelect}
             eventDrop={onDrop}
             eventResize={onResize}
+            eventAllow={(_dropInfo: any, draggedEvent: EventApi | null) => {
+              if (role === 'admin' || role === 'trabajador') return true
+              if (!draggedEvent) return false // arrastre externo: no permitir al cliente
+              const ownerId = (draggedEvent.extendedProps as any)?.userId as string | undefined
+              return ownerId === meId
+            }}
             datesSet={(info) => {
               // pide datos del rango visible
               setRange({
