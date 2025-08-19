@@ -7,6 +7,7 @@ import MapPage from '@/pages/Maps'
 import AdminStats from '@/pages/AdminStats'
 import Login from '@/pages/Login'
 import Forbidden from '@/pages/Forbidden'
+import PayResult from '@/pages/pay/PayResult'
 
 export default function App() {
   return (
@@ -18,6 +19,9 @@ export default function App() {
             <Route index element={<Dashboard/>} />
             <Route path="bookings" element={<Bookings/>} />
             <Route path="map" element={<MapPage/>} />
+            <Route path="pay/success" element={<PayResult/>} />
+            <Route path="pay/failure" element={<PayResult/>} />
+            <Route path="pay/pending" element={<PayResult/>} />
             <Route element={<RequireRole roles={['admin']}/>}>
               <Route path="admin/stats" element={<AdminStats/>} />
             </Route>

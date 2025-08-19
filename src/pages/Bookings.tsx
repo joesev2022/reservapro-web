@@ -27,6 +27,7 @@ type Booking = {
   endAt: string   // ISO (UTC)
   venue: Venue
   user?: UserMini // 👈 importante para permisos en el front
+  status: 'pending' | 'paid' | 'cancelled'
 }
 
 export default function Bookings() {
@@ -255,6 +256,23 @@ export default function Bookings() {
           </div>
 
           <DialogFooter className="gap-2">
+
+            {editing && (bookingsQ.data?.find(b => b.id === editing.id)?.status !== 'paid') && (
+              <Button
+                variant="outline"
+                onClick={async () => {
+                  try {
+                    const { data } = await http.post('/payments/checkout', { bookingId: editing.id })
+                    toast('Redirigiendo a Mercado Pago…')
+                    window.open(data.initPoint, '_self') // o window.location.href = data.initPoint
+                  } catch {}
+                }}
+              >
+                Pagar
+              </Button>
+            )}
+
+
             <Button variant="outline" onClick={() => setOpen(false)}>Cerrar</Button>
 
             {canEditThis(editing?.ownerId) && (

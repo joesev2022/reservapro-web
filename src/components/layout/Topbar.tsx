@@ -9,6 +9,7 @@ import { Sidebar } from './Sidebar'
 import { useAuth } from '@/store/auth'
 import { useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
+import NotificationsBell from './NotificationsBell'
 
 export function Topbar() {
   const [open, setOpen] = useState(false)
@@ -40,6 +41,7 @@ export function Topbar() {
 
         <div className="ml-auto flex items-center gap-3">
           <Input placeholder="Buscar..." className="w-56 hidden sm:block" />
+          <NotificationsBell />
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button variant="ghost" className="flex items-center gap-2">
