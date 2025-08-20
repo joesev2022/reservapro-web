@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { useLocation } from 'react-router-dom'
+import { useLocation, useNavigate } from 'react-router-dom'
 import FullCalendar from '@fullcalendar/react'
 import timeGridPlugin from '@fullcalendar/timegrid'
 import dayGridPlugin from '@fullcalendar/daygrid'
@@ -53,6 +53,8 @@ export default function Bookings() {
   const [open, setOpen] = useState(false)
   const [editing, setEditing] = useState<{ id: string; title: string; start?: Date|null; end?: Date|null; ownerId?: string } | null>(null)
 
+  const navigate = useNavigate()
+
   useEffect(() => {
     if (!venueId && venuesQ.data?.length) setVenueId(venuesQ.data[0].id)
   }, [venuesQ.data, venueId])
@@ -84,7 +86,7 @@ export default function Bookings() {
       title: b.title ?? 'Reserva',
       start: b.startAt, // ISO UTC; FullCalendar los interpreta ok
       end: b.endAt,
-      extendedProps: { userId: b.user?.id }, // 👈 lo usamos en eventAllow
+      extendedProps: { userId: b.user?.id, status: b.status }, // 👈 lo usamos en eventAllow
     }))
   }, [bookingsQ.data])
 
@@ -176,6 +178,50 @@ export default function Bookings() {
     };
   }, [qc]);
 
+  const pagar = async () => {
+    if (!editing) return
+    const bookingId = editing.id
+
+    try {
+      const { data } = await http.post('/payments/checkout', { bookingId })
+      const popup = window.open(
+        data.initPoint,
+        'mpCheckout',
+        'width=980,height=720,menubar=no,toolbar=no,location=no,status=no'
+      )
+
+      const started = Date.now()
+      const POLL_MS = 4000
+      const TIMEOUT_MS = 5 * 60 * 1000
+
+      const timer = window.setInterval(async () => {
+        const closed = popup?.closed
+        const timedOut = Date.now() - started > TIMEOUT_MS
+
+        try {
+          const { data: ver } = await http.get('/payments/verify-external', { params: { bookingId } })
+          if (ver.approved) {
+            window.clearInterval(timer)
+            popup?.close()
+            toast.success('Pago aprobado')
+            qc.invalidateQueries({ queryKey: ['bookings'] })
+            // 👇 muestra la pantalla de resultado en tu app:
+            navigate(`/pay/success?bookingId=${bookingId}`)
+            return
+          }
+        } catch {/* ignore */}
+
+        if (closed || timedOut) {
+          window.clearInterval(timer)
+          // 👇 si cerró sin aprobar, muéstrale el resultado/pending:
+          navigate(`/pay/pending?bookingId=${bookingId}`)
+        }
+      }, POLL_MS)
+    } catch {
+      toast.error('No se pudo iniciar el pago')
+    }
+  }
+
   return (
     <div className="p-6 space-y-4">
       <Card>
@@ -213,11 +259,31 @@ export default function Bookings() {
             select={onSelect}
             eventDrop={onDrop}
             eventResize={onResize}
-            eventAllow={(_dropInfo: any, draggedEvent: EventApi | null) => {
+            /* eventAllow={(_dropInfo: any, draggedEvent: EventApi | null) => {
               if (role === 'admin' || role === 'trabajador') return true
               if (!draggedEvent) return false // arrastre externo: no permitir al cliente
               const ownerId = (draggedEvent.extendedProps as any)?.userId as string | undefined
               return ownerId === meId
+            }} */
+            eventAllow={(_info, ev) => {
+              const st = (ev?.extendedProps as any)?.status
+              if (st === 'paid') return (role === 'admin' || role === 'trabajador') // bloquea a cliente
+              if (role === 'admin' || role === 'trabajador') return true
+              return (ev?.extendedProps as any)?.userId === meId
+            }}
+            eventContent={(arg) => {
+              const st = (arg.event.extendedProps as any)?.status
+              return (
+                <div className="fc-event-main-frame">
+                  <span className="fc-event-time">{arg.timeText}</span>
+                  <span className="fc-event-title ml-1">{arg.event.title}</span>
+                  {st === 'paid' && (
+                    <span className="ml-2 rounded px-1 text-[8px] bg-green-600 text-white">
+                      PAID
+                    </span>
+                  )}
+                </div>
+              )
             }}
             datesSet={(info) => {
               // pide datos del rango visible
@@ -233,7 +299,7 @@ export default function Bookings() {
       
       {/* 👇 Modal Editar Reserva */}
       <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent>
+        <DialogContent className="sm:max-w-[580px]">
           <DialogHeader>
             <DialogTitle>Editar reserva</DialogTitle>
           </DialogHeader>
@@ -250,6 +316,9 @@ export default function Bookings() {
             <div className="text-xs text-muted-foreground">
               Dueño: {editing?.ownerId === meId ? 'Tú' : (bookingsQ.data?.find(b => b.id === editing?.id)?.user?.name ?? '—')}
             </div>
+            <div className="text-xs">
+              Estado: {bookingsQ.data?.find(b => b.id === editing?.id)?.status ?? 'pending'}
+            </div>
             <div className="text-sm text-muted-foreground">
               {editing?.start?.toLocaleString()} — {editing?.end?.toLocaleString()}
             </div>
@@ -257,21 +326,26 @@ export default function Bookings() {
 
           <DialogFooter className="gap-2">
 
-            {editing && (bookingsQ.data?.find(b => b.id === editing.id)?.status !== 'paid') && (
+            {/* {editing && (bookingsQ.data?.find(b => b.id === editing.id)?.status !== 'paid') && (
               <Button
                 variant="outline"
                 onClick={async () => {
                   try {
                     const { data } = await http.post('/payments/checkout', { bookingId: editing.id })
                     toast('Redirigiendo a Mercado Pago…')
-                    window.open(data.initPoint, '_self') // o window.location.href = data.initPoint
+                    window.open(data.initPoint, '_blank') // o window.location.href = data.initPoint
                   } catch {}
                 }}
               >
                 Pagar
               </Button>
-            )}
+            )} */}
 
+            <Button variant="secondary" onClick={pagar}>Pagar</Button>
+
+            <Button variant="outline" onClick={() => qc.invalidateQueries({ queryKey: ['bookings'] })}>
+              Actualizar estado
+            </Button>
 
             <Button variant="outline" onClick={() => setOpen(false)}>Cerrar</Button>
 
